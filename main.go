@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -54,7 +55,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		toUpper("toUpper test "))
 }
 
-func unoconConvert(w http.ResponseWriter, input string) {
+func unoconConvert(w http.ResponseWriter, filename string) {
 	client := clientConn()
 	m, err := dexec.ByCreatingContainer(docker.CreateContainerOptions{
 		Config: &docker.Config{Image: "unoconv2"}})
@@ -62,13 +63,27 @@ func unoconConvert(w http.ResponseWriter, input string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	cmd := d.Command(m, "sh", "-c", fmt.Sprintf("echo \"%s\" |unoconv --stdin --stdout -f txt ;echo \"ContainerId: ${HOSTNAME}\"", input))
-	pipeReader, pipeWriter := io.Pipe()
-	cmd.Stdout = pipeWriter
-	cmd.Stderr = pipeWriter
-	go writeCmdOutput(w, pipeReader)
-	cmd.Run()
-	pipeWriter.Close()
+	// cmd := d.Command(m, "tr", "[:lower:]", "[:upper:]")
+	cmd := d.Command(m, "unoconv", "--stdin", "--stdout", "--format=txt")
+	wc, err := cmd.StdinPipe() // <--
+	if err != nil {
+		panic(err)
+	}
+	cmd.Stdout = w
+	file, err := ioutil.ReadFile(filename)
+	if err != nil {
+		fmt.Printf("File error: %v\n", err)
+	}
+	if err := cmd.Start(); err != nil {
+		panic(err)
+	}
+	fmt.Fprint(wc, file) // <--
+	wc.Close()
+
+	if err := cmd.Wait(); err != nil {
+		panic(err)
+	}
+
 }
 
 func writeCmdOutput(res http.ResponseWriter, pipeReader *io.PipeReader) {
