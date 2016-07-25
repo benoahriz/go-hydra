@@ -17,11 +17,24 @@ import (
 )
 
 var (
-	d       dexec.Docker
-	sums    = make(map[int]string)
-	client  docker.Client
-	BUF_LEN = 1024
+	d      dexec.Docker
+	sums   = make(map[int]string)
+	client docker.Client
+	bufLen = 1024
 )
+
+type flushWriter struct {
+	f http.Flusher
+	w io.Writer
+}
+
+func (fw *flushWriter) Write(p []byte) (n int, err error) {
+	n, err = fw.w.Write(p)
+	if fw.f != nil {
+		fw.f.Flush()
+	}
+	return
+}
 
 func clientConn() *docker.Client {
 	endpoint := "unix:///var/run/docker.sock"
@@ -58,39 +71,63 @@ func handler(w http.ResponseWriter, r *http.Request) {
 func unoconConvert(w http.ResponseWriter, filename string) {
 	client := clientConn()
 	m, err := dexec.ByCreatingContainer(docker.CreateContainerOptions{
-		Config: &docker.Config{Image: "unoconv2"}})
+		Config: &docker.Config{Image: "gonitro/unoconv2"}})
 	d := dexec.Docker{client}
 	if err != nil {
 		log.Fatal(err)
 	}
-	// cmd := d.Command(m, "tr", "[:lower:]", "[:upper:]")
 	cmd := d.Command(m, "unoconv", "--stdin", "--stdout", "--format=txt")
-	wc, err := cmd.StdinPipe() // <--
+	fmt.Println(cmd)
+	fmt.Println(filename)
+
+	//////
+
+	// cmd.Stdout = os.Stdout
+	// cmd.Stderr = os.Stderr
+
+	///////
+
+	fmt.Println("Starting StdinPipe")
+	wc, err := cmd.StdinPipe()
 	if err != nil {
-		panic(err)
-	}
-	cmd.Stdout = w
-	file, err := ioutil.ReadFile(filename)
-	if err != nil {
-		fmt.Printf("File error: %v\n", err)
+		fmt.Printf("StdinPipe error: %s\n", err)
 	}
 	if err := cmd.Start(); err != nil {
 		panic(err)
 	}
-	fmt.Fprint(wc, file) // <--
-	wc.Close()
-
-	if err := cmd.Wait(); err != nil {
-		panic(err)
+	// cmd.Wait()
+	file, err := os.OpenFile(filename, os.O_RDONLY, 0666)
+	if err != nil {
+		fmt.Println(err)
 	}
+
+	wb, err := io.Copy(wc, file)
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Printf("Copy written bytes: %v\n", wb)
+	////////
+
+	byteArray := []byte("myString")
+	w.Write(byteArray)
+	// w.Write(&cmd.Stdout)
+	///////
+
+	err = wc.Close()
+	if err != nil {
+		fmt.Printf("WriteCloser error: %s\n", err)
+	}
+	fmt.Println("Closed Pipe")
 
 }
 
-func writeCmdOutput(res http.ResponseWriter, pipeReader *io.PipeReader) {
-	buffer := make([]byte, BUF_LEN)
+func writeCmdOutput(res http.ResponseWriter, pipeReader io.ReadCloser) {
+	buffer := make([]byte, bufLen)
 	for {
+		fmt.Println("before reading")
 		n, err := pipeReader.Read(buffer)
-		if err != nil {
+		fmt.Printf("Copy written bytes: %v err: %v \n", n, err)
+		if err != nil || n <= 0 {
 			pipeReader.Close()
 			break
 		}
@@ -107,11 +144,62 @@ func writeCmdOutput(res http.ResponseWriter, pipeReader *io.PipeReader) {
 	}
 }
 
-func filenameHandler(w http.ResponseWriter, r *http.Request) {
+func toUpperDocker(w http.ResponseWriter, filename string) {
+	client := clientConn()
+	m, err := dexec.ByCreatingContainer(docker.CreateContainerOptions{
+		Config: &docker.Config{Image: "busybox"}})
+	d := dexec.Docker{client}
+	if err != nil {
+		log.Fatal(err)
+	}
+	cmd := d.Command(m, "tr", "[:lower:]", "[:upper:]")
+	fmt.Println(cmd)
+
+	cmd.Stdout = os.Stdout
+
+	file, err := ioutil.ReadFile(filename)
+	if err != nil {
+		fmt.Printf("ReadFile error: %v\n", err)
+	}
+	fmt.Println("Starting StdinPipe")
+	wc, err := cmd.StdinPipe()
+	if err != nil {
+		fmt.Printf("StdinPipe error: %s\n", err)
+	}
+	///
+
+	///
+	if err := cmd.Start(); err != nil {
+		panic(err)
+	}
+
+	// cmd.Stdout = w
+	// io.Copy(w, cmd.Stdout)
+
+	//stream the file to the WriteCloser
+	_, err = fmt.Fprint(wc, string(file))
+	if err != nil {
+		fmt.Printf("file Fprint error: %s\n", err)
+	}
+
+	err = wc.Close()
+	if err != nil {
+		fmt.Printf("WriteCloser error: %s\n", err)
+	}
+
+}
+func convertPdfHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("GET params were:", r.URL.Query())
 	filename := r.URL.Query().Get("filename")
 	if filename != "" {
 		unoconConvert(w, filename)
+	}
+}
+func toUpperHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("GET params were:", r.URL.Query())
+	filename := r.URL.Query().Get("filename")
+	if filename != "" {
+		toUpperDocker(w, filename)
 	}
 }
 
@@ -149,6 +237,7 @@ func main() {
 	http.HandleFunc("/upload", upload)
 	fs := http.FileServer(http.Dir("test"))
 	http.Handle("/test/", http.StripPrefix("/test/", fs))
-	http.HandleFunc("/convert/pdf", filenameHandler)
+	http.HandleFunc("/convert/pdf", convertPdfHandler)
+	http.HandleFunc("/toupper/txt", toUpperHandler)
 	http.ListenAndServe(":8080", nil)
 }
