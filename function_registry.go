@@ -8,15 +8,21 @@ import (
 )
 
 const (
-	FunctionTextUppercase = "text.uppercase"
+	EngineContainer = "container"
+	EngineBinary    = "binary"
+
+	FunctionTextUppercase  = "text.uppercase"
 	FunctionRenderURLToPDF = "render.url_to_pdf"
 	FunctionConvertMarkdown = "convert.markdown"
 )
 
 type FunctionSpec struct {
 	Name           string
+	Engine         string
 	Image          string
 	Command        []string
+	BinaryPath     string
+	Args           []string
 	TimeoutMS      int
 	OutputMimeType string
 }
@@ -28,6 +34,7 @@ type FunctionRunner interface {
 var FunctionRegistry = map[string]FunctionSpec{
 	FunctionTextUppercase: {
 		Name:           FunctionTextUppercase,
+		Engine:         EngineContainer,
 		Image:          "busybox",
 		Command:        []string{"tr", "[:lower:]", "[:upper:]"},
 		TimeoutMS:      30000,
@@ -35,6 +42,7 @@ var FunctionRegistry = map[string]FunctionSpec{
 	},
 	FunctionRenderURLToPDF: {
 		Name:           FunctionRenderURLToPDF,
+		Engine:         EngineContainer,
 		Image:          "gonitro/unoconv2",
 		Command:        []string{"sh", "-c", "render-url-to-pdf"},
 		TimeoutMS:      60000,
@@ -42,6 +50,7 @@ var FunctionRegistry = map[string]FunctionSpec{
 	},
 	FunctionConvertMarkdown: {
 		Name:           FunctionConvertMarkdown,
+		Engine:         EngineContainer,
 		Image:          "busybox",
 		Command:        []string{"sh", "-c", "convert-to-markdown"},
 		TimeoutMS:      30000,

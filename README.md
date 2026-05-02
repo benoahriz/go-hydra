@@ -1,17 +1,82 @@
 # go-hydra
 
-`go-hydra` is a Go HTTP service prototype that demonstrates one global API surface where each endpoint behaves like a function: JSON input arrives over HTTP, is piped to a Docker container over stdin, and the container's stdout is returned directly in the HTTP response.
+`go-hydra` is a Go HTTP service prototype that demonstrates one global API surface where each request behaves like a function call: JSON input arrives over HTTP, is passed to a runtime engine over stdin, and stdout is returned in a structured response.
 
-The core idea is to use Docker as a function execution engine for a lightweight Function-as-a-Service pattern that can fan out horizontally for scale.
+The core idea is to use pluggable execution engines (container and binary) for a lightweight Function-as-a-Service pattern that can fan out horizontally for scale.
 
 Current examples include:
 
 - text processing (lowercase to uppercase)
 - URL-to-PDF rendering (post a URL, let a container fetch and render, return PDF bytes)
 
+## Architecture (Infographic)
+
+```mermaid
+flowchart LR
+    A[Client] --> B[POST /functions/invoke]
+    B --> C[Invoke Handler]
+    C --> D[Validate Envelope\nfunction, input, meta]
+    D --> E{Function Known?}
+    E -- no --> F[404 unknown_function\nJSON error envelope]
+    E -- yes --> G[Function Registry Lookup]
+    G --> H[Validate Typed Input\n422 on contract errors]
+    H --> I[Engine Runner]
+    I --> J{FunctionSpec.engine}
+    J -->|container| K[Container Runner]
+    J -->|binary| L[Binary Runner]
+    K --> M{Container Engine Available}
+    M -->|docker| N[docker run -i IMAGE CMD]
+    M -->|podman fallback| O[podman run -i IMAGE CMD]
+    N --> P[Container stdin/stdout]
+    O --> P
+    L --> Q[Local binary exec\nBINARY_PATH ARGS]
+    Q --> R[Binary stdin/stdout]
+    P --> S{Execution OK?}
+    R --> S
+    S -- no --> T[500 container_execution_failed\nJSON error envelope]
+    S -- yes --> U[Map stdout to output payload]
+    U --> V[200 OK\nJSON success envelope]
+```
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant H as Invoke Handler
+    participant R as Function Registry
+    participant E as Engine Runner
+    participant CR as Container Runner
+    participant BR as Binary Runner
+    participant X as Function Container / Local Binary
+
+    C->>H: POST /functions/invoke\n{function,input,meta}
+    H->>H: Validate envelope
+    H->>R: Lookup function spec
+    R-->>H: engine + runtime spec + output type
+    H->>H: Validate typed input
+    H->>E: Run(spec, stdin)
+    alt spec.engine == container
+        E->>CR: dispatch
+        CR->>X: docker/podman run -i image cmd
+        X-->>CR: stdout/stderr + exit code
+        CR-->>E: stdout/stderr/result
+    else spec.engine == binary
+        E->>BR: dispatch
+        BR->>X: exec binaryPath args
+        X-->>BR: stdout/stderr + exit code
+        BR-->>E: stdout/stderr/result
+    end
+    E-->>H: stdout/stderr/result
+    alt Success
+        H-->>C: 200 {ok:true, output, meta}
+    else Error
+        H-->>C: 4xx/5xx {ok:false, error, meta}
+    end
+```
+
 ## Local Run (prototype)
 
-1. Ensure Docker is running and the local socket is available.
+1. Ensure Docker or Podman is installed and running.
 2. Install Go dependencies.
 3. Start the server.
 
@@ -32,4 +97,4 @@ System design docs are scaffolded under `docs/design/`.
 ## Notes
 
 - Current storage for todos is in-memory.
-- Docker-based execution is local-first and intended to demonstrate a container-per-function architecture.
+- Runtime is local-first and supports container or binary execution backends behind the same invoke schema.

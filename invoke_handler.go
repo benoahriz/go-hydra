@@ -14,7 +14,7 @@ type invokeOutputUppercase struct {
 	Text string `json:"text"`
 }
 
-var invokeRunner FunctionRunner = DockerCLIRunner{}
+var invokeRunner FunctionRunner = NewEngineRunner()
 
 func InvokeFunctionHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
