@@ -4,10 +4,11 @@
 
 The core idea is to use pluggable execution engines (container and binary) for a lightweight Function-as-a-Service pattern that can fan out horizontally for scale.
 
-Current examples include:
+Current function contracts include:
 
-- text processing (lowercase to uppercase)
-- URL-to-PDF rendering (post a URL, let a container fetch and render, return PDF bytes)
+- `text.uppercase` (implemented and validated end-to-end)
+- `render.url_to_pdf` (contract defined, runtime command/image still placeholder)
+- `convert.markdown` (contract defined, experimental and not yet validated end-to-end)
 
 ## Architecture (Infographic)
 
@@ -86,6 +87,33 @@ Example:
 go run ./cmd/go-hydra
 ```
 
+## Invoke Contract
+
+Canonical endpoint:
+
+- `POST /functions/invoke`
+
+Request envelope:
+
+```json
+{
+  "function": "text.uppercase",
+  "input": { "text": "hello" },
+  "meta": {
+    "request_id": "demo-1",
+    "timeout_ms": 30000
+  }
+}
+```
+
+Example call:
+
+```bash
+curl -s -X POST "http://127.0.0.1:8080/functions/invoke" \
+  -H "Content-Type: application/json" \
+  -d '{"function":"text.uppercase","input":{"text":"hello hydra"},"meta":{"request_id":"demo-1","timeout_ms":30000}}'
+```
+
 ## Design Docs Workflow
 
 System design docs are scaffolded under `docs/design/`.
@@ -98,3 +126,4 @@ System design docs are scaffolded under `docs/design/`.
 
 - Current storage for todos is in-memory.
 - Runtime is local-first and supports container or binary execution backends behind the same invoke schema.
+- Container execution currently keeps exited containers for debug visibility (no `--rm`), so clean up periodically when needed.
