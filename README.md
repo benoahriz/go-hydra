@@ -83,7 +83,7 @@ sequenceDiagram
 Example:
 
 ```bash
-go run .
+go run ./cmd/go-hydra
 ```
 
 ## Design Docs Workflow
