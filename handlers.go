@@ -7,15 +7,14 @@ import (
 	"fmt"
 	"html/template"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"strconv"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 
-	"github.com/ahmetalpbalkan/go-dexec"
+	"github.com/ahmetb/go-dexec"
 	"github.com/fsouza/go-dockerclient"
 	"github.com/gorilla/mux"
 )
@@ -94,29 +93,6 @@ func unoconConvert(w http.ResponseWriter, filename string) {
 
 }
 
-func writeCmdOutput(res http.ResponseWriter, pipeReader io.ReadCloser) {
-	buffer := make([]byte, bufLen)
-	for {
-		fmt.Println("before reading")
-		n, err := pipeReader.Read(buffer)
-		fmt.Printf("Copy written bytes: %v err: %v \n", n, err)
-		if err != nil || n <= 0 {
-			pipeReader.Close()
-			break
-		}
-
-		data := buffer[0:n]
-		res.Write(data)
-		if f, ok := res.(http.Flusher); ok {
-			f.Flush()
-		}
-		//reset buffer
-		for i := 0; i < n; i++ {
-			buffer[i] = 0
-		}
-	}
-}
-
 func toUpperDocker(w http.ResponseWriter, filename string) {
 	client := clientConn()
 	m, err := dexec.ByCreatingContainer(docker.CreateContainerOptions{
@@ -126,7 +102,7 @@ func toUpperDocker(w http.ResponseWriter, filename string) {
 	log.Println(cmd)
 
 	log.Printf("Read file %s", filename)
-	file, err := ioutil.ReadFile(filename)
+	file, err := os.ReadFile(filename)
 	if err != nil {
 		log.Printf("ReadFile error: %v\n", err)
 	}
@@ -241,11 +217,7 @@ func Index(w http.ResponseWriter, r *http.Request) {
 }
 
 func TodoIndex(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(todos); err != nil {
-		panic(err)
-	}
+	writeJSON(w, http.StatusOK, todos)
 }
 
 func TodoShow(w http.ResponseWriter, r *http.Request) {
@@ -253,24 +225,17 @@ func TodoShow(w http.ResponseWriter, r *http.Request) {
 	var todoId int
 	var err error
 	if todoId, err = strconv.Atoi(vars["todoId"]); err != nil {
-		panic(err)
+		writeJSONError(w, http.StatusBadRequest, "invalid todo id")
+		return
 	}
 	todo := RepoFindTodo(todoId)
 	if todo.Id > 0 {
-		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(todo); err != nil {
-			panic(err)
-		}
+		writeJSON(w, http.StatusOK, todo)
 		return
 	}
 
 	// If we didn't find it, 404
-	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	w.WriteHeader(http.StatusNotFound)
-	if err := json.NewEncoder(w).Encode(jsonErr{Code: http.StatusNotFound, Text: "Not Found"}); err != nil {
-		panic(err)
-	}
+	writeJSON(w, http.StatusNotFound, jsonErr{Code: http.StatusNotFound, Text: "Not Found"})
 
 }
 
@@ -280,25 +245,32 @@ curl -H "Content-Type: application/json" -d '{"name":"New Todo"}' http://localho
 */
 func TodoCreate(w http.ResponseWriter, r *http.Request) {
 	var todo Todo
-	body, err := ioutil.ReadAll(io.LimitReader(r.Body, 1048576))
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1048576))
 	if err != nil {
-		panic(err)
+		writeJSONError(w, http.StatusInternalServerError, "failed to read request body")
+		return
 	}
 	if err := r.Body.Close(); err != nil {
-		panic(err)
+		writeJSONError(w, http.StatusInternalServerError, "failed to close request body")
+		return
 	}
 	if err := json.Unmarshal(body, &todo); err != nil {
-		w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-		w.WriteHeader(422) // unprocessable entity
-		if err := json.NewEncoder(w).Encode(err); err != nil {
-			panic(err)
-		}
+		writeJSONError(w, http.StatusUnprocessableEntity, "invalid todo payload")
+		return
 	}
 
 	t := RepoCreateTodo(todo)
+	writeJSON(w, http.StatusCreated, t)
+}
+
+func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=UTF-8")
-	w.WriteHeader(http.StatusCreated)
-	if err := json.NewEncoder(w).Encode(t); err != nil {
-		panic(err)
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Printf("json encode failed: %v", err)
 	}
+}
+
+func writeJSONError(w http.ResponseWriter, status int, text string) {
+	writeJSON(w, status, jsonErr{Code: status, Text: text})
 }
